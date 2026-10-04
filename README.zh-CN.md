@@ -6,7 +6,7 @@
 
 <p align="center"><strong>一个 Codex 模型选择器，切换多个 ChatGPT 账号和外部 API 模型。</strong></p>
 
-<p align="center"><a href="README.md">English</a> · <a href="#快速开始">快速开始</a> · <a href="https://github.com/Killow1998/EasyMultiProvider/releases/latest">下载</a></p>
+<p align="center"><a href="README.md">English</a> · <a href="#快速开始">快速开始</a> · <a href="https://github.com/cnsunfishegg/EasyMultiProvider/releases/latest">下载</a></p>
 
 EMP 在本机运行，主要解决两件事：
 
@@ -30,7 +30,7 @@ EMP 在本机运行，主要解决两件事：
 时使用导入的账号，选中 `deepseek/deepseek-v4-pro` 时使用 DeepSeek API Key。编码任务、
 权限和工具仍由 Codex 管理。EMP 在本机统一管理模型列表、加密凭据和账号额度。
 
-当前源码版本为 `v0.12.10`。
+当前源码版本为 `v0.12.11`。
 
 ## 功能
 
@@ -135,7 +135,7 @@ Native、Subscription 和 External Provider 上下文标签。左侧模型列表
 
 ### 预构建安装包
 
-从 [GitHub Releases](https://github.com/Killow1998/EasyMultiProvider/releases)
+从 [GitHub Releases](https://github.com/cnsunfishegg/EasyMultiProvider/releases)
 下载已经审核的构建。
 [Package workflow](https://github.com/Killow1998/EasyMultiProvider/actions/workflows/package.yml)
 会在发布前原生构建并实际启动检查以下产物：
@@ -180,7 +180,7 @@ Linux 用户安装与网页更新不需要 `sudo` 或管理员密码。
 配置与账号数据保存在上述用户配置目录，更新程序不会替换它们。
 
 “检查更新”上的红点表示有可用版本。如果旧版 Windows EMP 更新时退出后没有重新打开，
-从 [Releases](https://github.com/Killow1998/EasyMultiProvider/releases/latest) 下载
+从 [Releases](https://github.com/cnsunfishegg/EasyMultiProvider/releases/latest) 下载
 `EMP.exe`，替换已关闭的程序再打开即可，账号和设置仍保留在用户配置目录。
 v0.12.5 修复了后续更新中误等已退出进程的问题。
 已有系统 `.deb` 安装不会被自动卸载；停止

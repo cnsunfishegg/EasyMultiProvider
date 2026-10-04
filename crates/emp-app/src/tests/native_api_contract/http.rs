@@ -410,7 +410,7 @@ fn native_endpoint_matches_retry_and_terminal_error_decisions() {
         ("gateway", 504, 1),
         ("context", 413, 1),
         ("forward401", 401, 1),
-        ("network", 200, 2),
+        ("network", 503, 1),
     ] {
         let upstream = ScenarioUpstream::start(case, attempts);
         let (directory, server) = forward_server(&upstream.base_url());

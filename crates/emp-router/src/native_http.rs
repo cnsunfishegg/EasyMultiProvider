@@ -166,6 +166,8 @@ pub struct NativeRouter<'a> {
     client: &'a HttpClient,
     retry_observer: Option<&'a (dyn Fn(NativeRetryDecision) + Sync)>,
     attempt_observer: Option<&'a (dyn Fn() + Sync)>,
+    attempt_gate: Option<&'a (dyn Fn() -> Result<(), NativeHttpError> + Sync)>,
+    failure_policy: Option<&'a (dyn Fn(&NativeHttpError) -> bool + Sync)>,
 }
 
 #[derive(Clone, Copy)]
@@ -187,6 +189,8 @@ impl<'a> NativeRouter<'a> {
             client,
             retry_observer: None,
             attempt_observer: None,
+            attempt_gate: None,
+            failure_policy: None,
         }
     }
 
@@ -203,6 +207,17 @@ impl<'a> NativeRouter<'a> {
     /// Called after projection and authentication, immediately before HTTP dispatch.
     pub fn with_attempt_observer(mut self, observer: &'a (dyn Fn() + Sync)) -> Self {
         self.attempt_observer = Some(observer);
+        self
+    }
+
+    /// Application evidence can stop a retry but never widen replay eligibility.
+    pub fn with_attempt_policy(
+        mut self,
+        gate: &'a (dyn Fn() -> Result<(), NativeHttpError> + Sync),
+        failure: &'a (dyn Fn(&NativeHttpError) -> bool + Sync),
+    ) -> Self {
+        self.attempt_gate = Some(gate);
+        self.failure_policy = Some(failure);
         self
     }
 
@@ -363,6 +378,9 @@ impl<'a> NativeRouter<'a> {
             }
             let mut request_headers = headers.as_ref().expect("resolved headers").clone();
             request_headers.insert("Content-Encoding".to_owned(), "zstd".to_owned());
+            if let Some(gate) = self.attempt_gate {
+                gate()?;
+            }
             if let Some(observer) = self.attempt_observer {
                 observer();
             }
@@ -387,12 +405,7 @@ impl<'a> NativeRouter<'a> {
                     };
                     if attempt == 0
                         && allow_retries
-                        && matches!(
-                            kind,
-                            HttpTransportErrorKind::Network
-                                | HttpTransportErrorKind::ConnectTimeout
-                                | HttpTransportErrorKind::ReadTimeout
-                        )
+                        && matches!(kind, HttpTransportErrorKind::ConnectTimeout)
                     {
                         self.retry_decision(
                             NativeRetryReason::Network,
@@ -440,6 +453,18 @@ impl<'a> NativeRouter<'a> {
                     .map_err(|error| read_error(error.kind()))?;
                 if is_explicit_context_error(status, &content_type, &raw) {
                     return Err(NativeHttpError::context(selected));
+                }
+                let error = upstream_http_error(
+                    status,
+                    &content_type,
+                    &raw,
+                    &proxy_headers,
+                    retry,
+                    selected.clone(),
+                );
+                let policy_allows = self.failure_policy.is_none_or(|policy| policy(&error));
+                if !policy_allows {
+                    return Err(error);
                 }
                 if allow_retries
                     && attempt == 0
@@ -547,6 +572,9 @@ impl<'a> NativeRouter<'a> {
             .map_err(|error| NativeHttpError::router(error.status(), error.to_string()))?;
         let mut request_headers = resolve_headers(false)?;
         request_headers.insert("Content-Encoding".to_owned(), "zstd".to_owned());
+        if let Some(gate) = self.attempt_gate {
+            gate()?;
+        }
         if let Some(observer) = self.attempt_observer {
             observer();
         }

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.12.11 (2026-10-05)
+
+- Gate HTTP, SSE and WebSocket calls on evidence for the selected source and
+  model. Confirmed exhaustion and explicit rate-limit cooldowns affect the next
+  attempt immediately; unknown or low quota stays usable. Recovery permits one
+  same-source probe and never selects another account automatically.
+- Merge concurrent quota refreshes by account owner, reject stale results after
+  credential changes or newer failures, bound helper concurrency and failure
+  backoff, and wake the existing sampler for stale request-time observations.
+- Preserve `plugins = false` in quota helpers, isolate their home directories,
+  cap output, and bound shutdown when a helper ignores EOF. Cancel quota reads
+  on exit while still saving rotated credentials, and record worker drain stages.
+- Share credential import and local catalog publication behind existing APIs,
+  with idempotent imports and receipts that distinguish local publication from
+  verified Codex use. Existing integration leases and actions are preserved.
+- Stop automatic replay after ambiguous native connection failures and gateway
+  timeouts. Add real Codex/EMP fixture acceptance for explicit model switching
+  and continuation after quota rejection or interruption.
+- Build release updaters against the publishing repository, so fork packages
+  continue receiving that fork's releases. See `docs/backend-availability.md`
+  for acceptance evidence and remaining verification limits.
+
 ## 0.12.10 (2026-10-04)
 
 - Reduce request and stream teardown delays by starting disconnect monitoring

@@ -545,7 +545,29 @@ fn quit_from_the_page_stops_the_process() {
     let response = emp.post("/api/quit", &json!({}));
     assert_eq!(response.status, 200, "{}", response.text());
     assert_eq!(response.json(), json!({"status": "stopping"}));
-    assert_eq!(emp.wait_exit(), Some(0));
+    // Cold runtime discovery may still be draining after the stopping receipt.
+    // Observe actual exit rather than interpreting the receipt as completion.
+    assert_eq!(
+        emp.wait_exit_with_timeout(std::time::Duration::from_secs(30)),
+        Some(0)
+    );
+    let restored = workspace.read_codex_config();
+    assert!(!restored.contains("127.0.0.1"), "{restored}");
+    assert!(restored.contains("web_search = true"), "{restored}");
+    // Restart with automatic activation disabled: native settings remain
+    // restored without an extra restore request or a second restart.
+    let mut config: Value =
+        serde_json::from_slice(&std::fs::read(&workspace.config_path).unwrap()).unwrap();
+    config["auto_enable_on_start"] = json!(false);
+    workspace.write_config(config);
+    let mut restarted = workspace.start();
+    assert_eq!(restarted.get("/api/config").status, 200);
+    assert_eq!(workspace.read_codex_config(), restored);
+    assert_eq!(restarted.post("/api/quit", &json!({})).status, 200);
+    assert_eq!(
+        restarted.wait_exit_with_timeout(std::time::Duration::from_secs(30)),
+        Some(0)
+    );
 }
 
 fn rollout_record(kind: &str, payload: Value, second: u32) -> String {

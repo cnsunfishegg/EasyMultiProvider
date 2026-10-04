@@ -42,6 +42,7 @@ jobs:
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_RELEASE_DEBUG: 0
       CARGO_TARGET_DIR: ${{ github.workspace }}/.emp-package-target
+      EMP_RELEASE_REPOSITORY: ${{ github.repository }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

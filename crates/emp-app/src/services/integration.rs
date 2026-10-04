@@ -302,10 +302,17 @@ impl IntegrationState {
             startup_conflicts: std::sync::Mutex::new(Vec::new()),
             runtime,
             watch: Default::default(),
-            inventory: emp_codex::runtime_inventory::RuntimeInventory::new(
-                codex_home,
-                (codex_binary != "codex").then(|| codex_binary.into()),
-            ),
+            inventory: if cfg!(test) && codex_binary != "codex" {
+                emp_codex::runtime_inventory::RuntimeInventory::isolated(
+                    codex_home,
+                    codex_binary.into(),
+                )
+            } else {
+                emp_codex::runtime_inventory::RuntimeInventory::new(
+                    codex_home,
+                    (codex_binary != "codex").then(|| codex_binary.into()),
+                )
+            },
         }
     }
 

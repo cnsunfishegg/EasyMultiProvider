@@ -438,11 +438,15 @@ async fn context_length_errors_become_413_even_inside_noise() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_dropped_connection_is_retried_once_then_the_request_succeeds() {
+async fn a_connection_dropped_after_dispatch_is_not_replayed() {
     let upstream = NativeUpstream::start();
     let (result, _refreshes) = run(&upstream, "network_once", false, None).await;
-    assert_eq!(result["status"], 200);
-    assert_eq!(upstream.requests().len(), 2, "exactly one network retry");
+    assert_eq!(result["status"], 503);
+    assert_eq!(
+        upstream.requests().len(),
+        1,
+        "dispatch is not proof of rejection"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

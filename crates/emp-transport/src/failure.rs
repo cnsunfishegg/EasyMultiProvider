@@ -285,6 +285,26 @@ pub struct HttpFailureInput<'a> {
     pub retry_after_seconds: Option<u64>,
 }
 
+/// Only structured provider codes constitute quota-denial evidence. Free text
+/// is still useful for display/retry classification, but cannot bar a source.
+pub fn confirmed_quota_error(detail: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(detail) else {
+        return false;
+    };
+    let error = value.get("error").unwrap_or(&value);
+    ["code", "type"].iter().any(|field| {
+        matches!(
+            error[*field].as_str(),
+            Some(
+                "usage_limit_reached"
+                    | "insufficient_quota"
+                    | "quota_exhausted"
+                    | "billing_hard_limit_reached"
+            )
+        )
+    })
+}
+
 pub fn http_failure(input: HttpFailureInput<'_>) -> UpstreamFailure {
     if matches!(input.status, 502..=504) && input.proxy_evidence {
         return UpstreamFailure::new(
@@ -299,7 +319,13 @@ pub fn http_failure(input: HttpFailureInput<'_>) -> UpstreamFailure {
         input.status,
         FailurePhase::TerminalValidation,
     )
-    .with_reason(http_failure_reason(input.status, input.detail));
+    .with_reason(
+        if matches!(input.status, 402 | 429) && confirmed_quota_error(input.detail) {
+            "quota_exhausted_confirmed"
+        } else {
+            http_failure_reason(input.status, input.detail)
+        },
+    );
     if matches!(input.status, 429 | 503) {
         failure.retry_after_seconds = input.retry_after_seconds;
     }
@@ -328,7 +354,8 @@ pub fn retry_allowed(
 }
 
 /// External requests retry twice before any output: 429 (never on `:free`
-/// routes; quota exhaustion stays terminal), 504, and 5xx-capacity. The
+/// routes; quota exhaustion stays terminal). Gateway timeouts do not prove
+/// that a generation was rejected before execution. The
 /// caller supplies an exponential backoff base of 500 ms capped at 8 s with
 /// ±25% jitter when no `Retry-After` applies.
 pub fn external_http_retry_allowed(
@@ -347,13 +374,12 @@ pub fn external_http_retry_allowed(
     {
         return false;
     }
-    let retryable = failure.status == 504
-        || (failure.status == 429
-            && !free_route
-            && matches!(
-                failure.failure_reason.as_deref(),
-                Some("rate_limited") | Some("upstream_capacity")
-            ));
+    let retryable = failure.status == 429
+        && !free_route
+        && matches!(
+            failure.failure_reason.as_deref(),
+            Some("rate_limited") | Some("upstream_capacity")
+        );
     retryable && failure.retry_after_seconds.unwrap_or(1) <= MAX_RETRY_AFTER_SECONDS
 }
 
@@ -393,6 +419,9 @@ pub fn public_failure_message(
         | FailureClass::LocalDeadline
         | FailureClass::Upstream504
         | FailureClass::Timeout => "The upstream request timed out.".to_owned(),
+        FailureClass::RateLimit if matches!(reason.as_deref(), Some("quota_exhausted_confirmed" | "quota_admission_rejected")) => {
+            "The selected source quota is exhausted for this model; wait for a recheck or select a source explicitly.".to_owned()
+        }
         FailureClass::RateLimit => "The upstream rate limit was reached.".to_owned(),
         FailureClass::Auth => "The upstream rejected the account credentials.".to_owned(),
         FailureClass::StreamIncomplete => {

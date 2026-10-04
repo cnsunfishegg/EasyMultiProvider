@@ -17,6 +17,27 @@ pub struct UpdateEndpoints {
 
 impl Default for UpdateEndpoints {
     fn default() -> Self {
+        // Release builds follow the repository that produced their artifacts.
+        // Local builds retain the upstream default. This is compile-time only:
+        // an environment variable cannot redirect an installed updater.
+        if let Some(repository) = option_env!("EMP_RELEASE_REPOSITORY") {
+            let valid = repository.split('/').count() == 2
+                && repository.split('/').all(|part| {
+                    !part.is_empty()
+                        && part.len() <= 100
+                        && part.bytes().all(|byte| {
+                            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')
+                        })
+                });
+            assert!(valid, "invalid packaged release repository");
+            return Self {
+                repository_url: format!("https://github.com/{repository}"),
+                release_api_url: format!(
+                    "https://api.github.com/repos/{repository}/releases/latest"
+                ),
+                allow_loopback_http: false,
+            };
+        }
         Self {
             repository_url: REPOSITORY_URL.to_owned(),
             release_api_url: RELEASE_API_URL.to_owned(),

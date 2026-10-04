@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 pub(crate) enum ExternalRequestError {
     Router(RouterError),
+    Admission(super::availability::Rejection),
     Route(RouteResolutionError),
     Unsupported,
     Disconnected,
@@ -119,6 +120,11 @@ impl Execution<'_> {
                 outcome.candidate(&candidate);
             }
             for attempt in 0..3 {
+                state
+                    .backend
+                    .availability
+                    .before_attempt(&candidate)
+                    .map_err(ExternalRequestError::Admission)?;
                 if let Some(outcome) = outcome.as_deref_mut() {
                     outcome.dispatch();
                     self.activity.get_or_insert_with(|| {
@@ -147,7 +153,20 @@ impl Execution<'_> {
                 if error.error_class() == FailureClass::ContextLengthExceeded {
                     crate::services::context::record(state, &candidate, body, false);
                 }
-                let retry = retry_delay(&error, attempt, &candidate);
+                if let Some(subject) = super::availability::ticket(&candidate) {
+                    state.backend.availability.failure(
+                        &subject,
+                        error.failure_reason().unwrap_or_default(),
+                        error.retry_after_seconds(),
+                    );
+                }
+                let retry = state
+                    .backend
+                    .availability
+                    .before_attempt(&candidate)
+                    .is_ok()
+                    .then(|| retry_delay(&error, attempt, &candidate))
+                    .flatten();
                 let fallback = retry.is_none()
                     && index + 1 < candidates.len()
                     && emp_transport::protocol_fallback_allowed(error.status(), false, false);

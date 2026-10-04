@@ -31,6 +31,7 @@ impl SummaryPolicy {
 #[derive(Debug)]
 pub(crate) enum RequestPreparationError {
     ModelRequired,
+    Admission(super::availability::Rejection),
     ConfigurationUnavailable,
     Route(RouteResolutionError),
     ModelSnapshotTooLarge,
@@ -43,6 +44,7 @@ pub(crate) enum RequestOperation {
 }
 
 pub(crate) struct PreparedRequest {
+    pub(crate) admission: super::availability::Admission,
     pub(crate) config: Value,
     pub(crate) route: ResolvedRoute,
     pub(crate) body: Value,
@@ -56,6 +58,7 @@ pub(crate) fn prepare_request(
     state: &ServerState,
     body: Value,
     operation: RequestOperation,
+    incoming: &std::collections::BTreeMap<String, String>,
 ) -> Result<PreparedRequest, RequestPreparationError> {
     let model = body
         .get("model")
@@ -93,8 +96,11 @@ pub(crate) fn prepare_request(
             })
         })
         .map_err(RequestPreparationError::Route)?;
-    let (route, body) = prepare_external_request(&config, route, body)?;
+    let (mut route, body) = prepare_external_request(&config, route, body)?;
+    let admission = super::availability::admit(state, &mut route, incoming)
+        .map_err(RequestPreparationError::Admission)?;
     Ok(PreparedRequest {
+        admission,
         config,
         route,
         body,

@@ -1,4 +1,6 @@
 //! Account-scoped quota refresh, reset and history operations.
+mod refresh;
+pub(crate) use refresh::RefreshCoordinator;
 
 use crate::app::ServerState;
 use crate::services::accounts::CredentialOperation;
@@ -75,6 +77,13 @@ fn save_account_quota_state(
 
 /// Durable-save attempts for credentials Codex rotated during a quota check.
 const PERSIST_ROTATION_ATTEMPTS: u32 = 3;
+
+fn query_control(state: &ServerState) -> emp_codex::quota::QuotaControl<'_> {
+    emp_codex::quota::QuotaControl {
+        timeout: Duration::from_secs(45),
+        cancelled: Some(&state.shutdown),
+    }
+}
 
 /// Test-only fault injection: rotated-credential saves to these auth files
 /// fail. A set, so tests running in parallel do not clear each other's paths.
@@ -364,7 +373,7 @@ fn refresh_imported_account(state: &ServerState, account_id: &str) -> Result<Val
         run_quota_query_persisting(
             auth,
             &crate::services::runtime::helper_binary(state)?,
-            Duration::from_secs(45),
+            query_control(state),
             allow_refresh,
             |refreshed| credentials.persist(refreshed),
         )
@@ -376,7 +385,7 @@ fn refresh_imported_account(state: &ServerState, account_id: &str) -> Result<Val
         return match read_native_login_quota(
             &state.backend.accounts.native_auth_path,
             &crate::services::runtime::helper_binary(state)?,
-            Duration::from_secs(45),
+            query_control(state),
         ) {
             Ok(quota) => {
                 save_account_quota_state(state, account_id, &auth_file, "valid", Some(&quota))
@@ -419,11 +428,18 @@ fn refresh_account_by_id_inner(state: &ServerState, account_id: &str) -> Result<
     if account_id != "@native" {
         return refresh_imported_account(state, account_id);
     }
+    let identity = super::availability::account_identity(state, account_id);
     let quota = read_native_login_quota(
         &state.backend.accounts.native_auth_path,
         &crate::services::runtime::helper_binary(state)?,
-        Duration::from_secs(45),
+        query_control(state),
     )?;
+    if super::availability::account_identity(state, account_id) != identity {
+        return Err(QuotaError::new(
+            "native login changed during quota refresh",
+            "quota_error",
+        ));
+    }
     if let Ok(mut current) = state.backend.accounts.native_quota.lock() {
         *current = Some(quota.clone());
     } else {
@@ -446,7 +462,20 @@ pub(crate) fn refresh_account_by_id(
     state: &ServerState,
     account_id: &str,
 ) -> Result<Value, QuotaError> {
+    let identity = super::availability::account_identity(state, account_id);
+    let revision = state.backend.availability.revision();
     let result = refresh_account_by_id_inner(state, account_id);
+    let current = super::availability::account_identity(state, account_id);
+    if let (Some((owner, version)), Some((current_owner, current_version)), Ok(snapshot)) =
+        (&identity, &current, &result)
+        && owner == current_owner
+        && (account_id != "@native" || version == current_version)
+    {
+        state
+            .backend
+            .availability
+            .quota(owner, revision, &snapshot["quota"]);
+    }
     let journal = &state.backend.diagnostics.journal;
     journal.event(
         if result.is_ok() { "info" } else { "warning" },
@@ -589,16 +618,17 @@ pub(crate) fn refresh_account_serialized(
     state: &ServerState,
     account_id: &str,
 ) -> Result<Value, QuotaError> {
-    let refresh_lock = quota_refresh_lock(state, account_id)
-        .ok_or_else(|| QuotaError::new("Codex account quota check failed", "quota_error"))?;
-    let _guard = refresh_lock
-        .lock()
-        .map_err(|_| QuotaError::new("Codex account quota check failed", "quota_error"))?;
-    refresh_account_by_id(state, account_id)
+    refresh::refresh(state, account_id, false)
 }
 
 pub(crate) fn sample_quotas_once(state: &Arc<ServerState>) -> QuotaSampleCounts {
-    let targets = quota_sample_targets(state);
+    sample_quota_targets(state, quota_sample_targets(state))
+}
+
+pub(crate) fn sample_quota_targets(
+    state: &Arc<ServerState>,
+    targets: Vec<String>,
+) -> QuotaSampleCounts {
     if targets.is_empty() {
         return QuotaSampleCounts::default();
     }
@@ -641,4 +671,32 @@ pub(crate) fn sample_quotas_once(state: &Arc<ServerState>) -> QuotaSampleCounts 
     counts
         .lock()
         .map_or_else(|_| QuotaSampleCounts::default(), |counts| *counts)
+}
+
+pub(crate) fn refresh_after_auth_rejection(
+    state: &ServerState,
+    account_id: &str,
+) -> Result<Value, QuotaError> {
+    refresh::refresh(state, account_id, true)
+}
+
+/// Wake the existing managed sampler. Generating requests never create a
+/// helper process or wait behind a potentially slow credential refresh.
+pub(crate) fn request_refresh(state: &ServerState, account: &str, owner: &str) {
+    let coordinator = &state.backend.accounts.quota_refreshes;
+    if !coordinator.schedule(owner) {
+        return;
+    }
+    if let Ok(mut requested) = state.backend.accounts.quota_sampler_wait.lock()
+        && requested.len() < 128
+    {
+        requested.insert(account.to_owned());
+        state.backend.accounts.quota_sampler_condition.notify_one();
+    }
+}
+
+pub(crate) fn invalidate_refresh(state: &ServerState, account: &str) {
+    if let Some((owner, _)) = super::availability::account_identity(state, account) {
+        state.backend.accounts.quota_refreshes.invalidate(&owner);
+    }
 }

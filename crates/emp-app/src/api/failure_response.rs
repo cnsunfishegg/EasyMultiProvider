@@ -25,6 +25,9 @@ fn external_http_error(
 ) -> Vec<u8> {
     match error {
         ExternalRequestError::Router(error) => router_response(error),
+        ExternalRequestError::Admission(error) => {
+            super::native_response::error_response(error.native())
+        }
         ExternalRequestError::Route(error) => route_resolution_response(error),
         ExternalRequestError::Disconnected => Vec::new(),
         ExternalRequestError::Unsupported => crate::http::response::json_error_response(
@@ -40,6 +43,7 @@ fn external_http_error(
 pub(crate) fn external_websocket_error(error: ExternalRequestError) -> Value {
     match error {
         ExternalRequestError::Router(error) => websocket_router_error(&error),
+        ExternalRequestError::Admission(error) => error.websocket(),
         ExternalRequestError::Route(error) => serde_json::json!({
             "type":"error", "status":error.status(),
             "error":{"code":"router_error","message":error.to_string()}
@@ -101,7 +105,12 @@ pub(crate) fn request_router_error_response(status: u16, message: &str) -> Vec<u
 pub(crate) fn router_error_response(error: RouterError) -> Vec<u8> {
     let failure_reason = error.failure_reason().map(str::to_owned);
     let error_class = error.error_class().as_str();
-    let code = if error_class == "rate_limit" {
+    let code = if matches!(
+        failure_reason.as_deref(),
+        Some("quota_exhausted_confirmed" | "quota_admission_rejected")
+    ) {
+        "usage_limit_reached".to_owned()
+    } else if error_class == "rate_limit" {
         "rate_limit_exceeded".to_owned()
     } else {
         failure_reason
@@ -110,7 +119,7 @@ pub(crate) fn router_error_response(error: RouterError) -> Vec<u8> {
     };
     let mut detail = serde_json::json!({
         "code": code,
-        "type": error_class,
+        "type": if code == "usage_limit_reached" { "usage_limit_reached" } else { error_class },
         "message": if error.kind() == RouterErrorKind::Upstream {
             public_failure_message(error.error_class(), error.failure_reason(), error.status())
         } else {

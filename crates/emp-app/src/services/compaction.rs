@@ -40,6 +40,11 @@ pub(crate) fn execute_summary_request(
     ids: &ProjectionIds,
     monitor: Option<&mut crate::services::disconnect::DisconnectMonitor>,
 ) -> Result<(CompleteResponse, ResolvedRoute), SummaryExecutionError> {
+    state
+        .backend
+        .availability
+        .before_attempt(route)
+        .map_err(|_| SummaryExecutionError::Router(RouterError::quota_unavailable()))?;
     if crate::services::claude_cli::selected(route) {
         return match crate::services::claude_cli::execute_complete(
             state, route, body, incoming, ids, monitor,
@@ -65,6 +70,13 @@ pub(crate) fn execute_summary_request(
             Ok((response, route.clone()))
         }
         crate::services::disconnect::DisconnectRace::Ready(Err(error)) => {
+            if let Some(subject) = super::availability::ticket(route) {
+                state.backend.availability.failure(
+                    &subject,
+                    error.failure_reason().unwrap_or_default(),
+                    error.retry_after_seconds(),
+                );
+            }
             Err(SummaryExecutionError::Router(error))
         }
         crate::services::disconnect::DisconnectRace::Disconnected => {

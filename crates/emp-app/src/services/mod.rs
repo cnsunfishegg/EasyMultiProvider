@@ -31,3 +31,7 @@ pub(crate) mod network_evidence;
 pub(crate) mod observation;
 pub(crate) mod request_outcome;
 pub(crate) mod request_preparation;
+
+pub(crate) mod availability;
+
+pub(crate) mod onboarding;

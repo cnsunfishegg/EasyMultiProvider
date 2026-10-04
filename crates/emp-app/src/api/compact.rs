@@ -51,12 +51,23 @@ pub(crate) fn compact_request(
         Ok(body) => body,
         Err(error) => return body_error_response(error),
     };
+    let admission_headers = request
+        .headers
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(':'))
+        .map(|(name, value)| (name.trim().to_lowercase(), value.trim().to_owned()))
+        .collect();
     let PreparedRequest {
+        admission: _admission,
         config,
         route,
         mut body,
-    } = match prepare_request(state, body, RequestOperation::Compact) {
+    } = match prepare_request(state, body, RequestOperation::Compact, &admission_headers) {
         Ok(prepared) => prepared,
+        Err(RequestPreparationError::Admission(error)) => {
+            return crate::api::native_response::error_response(error.native());
+        }
         Err(RequestPreparationError::ModelRequired) => {
             return request_router_error_response(400, "request.model is required");
         }

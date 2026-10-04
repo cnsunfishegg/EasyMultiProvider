@@ -33,6 +33,32 @@ fn statuses_and_proxy_evidence_keep_502_and_503_distinct() {
 }
 
 #[test]
+fn structured_exhaustion_is_terminal_and_gateway_timeout_cannot_prove_safe_replay() {
+    for (status, detail, reason) in [
+        (
+            429,
+            r#"{"error":{"code":"insufficient_quota"}}"#,
+            "quota_exhausted_confirmed",
+        ),
+        (504, "gateway timed out", "upstream_504"),
+    ] {
+        let failure = http_failure(HttpFailureInput {
+            status,
+            detail,
+            proxy_evidence: false,
+            retry_after_seconds: Some(1),
+        });
+        if status == 429 {
+            assert_eq!(failure.failure_reason.as_deref(), Some(reason));
+        }
+        assert!(!external_http_retry_allowed(
+            &failure, 0, false, false, false
+        ));
+    }
+    assert!(!emp_transport::confirmed_quota_error("insufficient_quota"));
+}
+
+#[test]
 fn network_failures_have_stable_content_free_classes() {
     let dns = network_failure(NetworkFailureKind::Dns, FailurePhase::Connect, false);
     let tls = network_failure(NetworkFailureKind::Tls, FailurePhase::Connect, false);

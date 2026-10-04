@@ -234,13 +234,13 @@ fn downstream_disconnect_cancels_a_waiting_upstream_stream() {
 
 #[test]
 fn stream_errors_keep_pre_and_post_output_boundaries() {
-    // The retry budget is three attempts, so the fixture answers every
-    // connection with the same 429 before the budget is exhausted.
+    // Explicit Retry-After feeds admission immediately, without queueing
+    // another generation attempt during the same cooldown.
     let upstream = OneShotUpstream::start_repeated_wire(
         429,
         "application/json",
         Some(6),
-        3,
+        1,
         vec![
             serde_json::to_vec(&json!({"error":{"message":"provider detail must not escape"}}))
                 .expect("upstream error JSON"),

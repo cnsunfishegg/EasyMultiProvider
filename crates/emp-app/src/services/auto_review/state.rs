@@ -51,7 +51,11 @@ impl ReviewState {
         }
         let unavailable = matches!(
             reason,
-            "quota_exhausted" | "rate_limited" | "payment_required" | "auth_rejected"
+            "quota_exhausted"
+                | "quota_exhausted_confirmed"
+                | "rate_limited"
+                | "payment_required"
+                | "auth_rejected"
         ) || matches!(error, "rate_limit" | "auth");
         if unavailable && let Ok(mut cooldowns) = self.cooldowns.lock() {
             cooldowns.insert(

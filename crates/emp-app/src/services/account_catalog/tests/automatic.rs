@@ -298,6 +298,7 @@ fn partial_native_catalog_refresh_keeps_a_known_model_routable() {
             &[],
             false,
         ));
+        assert!(catalog["models"].is_array(), "catalog response: {catalog}");
         assert!(
             catalog["models"]
                 .as_array()

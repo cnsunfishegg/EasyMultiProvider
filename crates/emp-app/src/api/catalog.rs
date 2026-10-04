@@ -13,7 +13,6 @@ use crate::http::response::json_error_response;
 use crate::http::response::response;
 use crate::http::response::status_text;
 use crate::http::response::unauthorized_response;
-use crate::services::catalog::refresh_catalog;
 use crate::services::catalog::server_catalog;
 use emp_codex::preserve_native_catalog;
 use emp_router::discovery::discover_models;
@@ -47,13 +46,13 @@ pub(crate) fn management_request(
         return update_catalog_context_preference(state, &body);
     }
     if request.raw_path() == "/api/catalog/refresh" {
-        let (path, model_count) = match refresh_catalog(state) {
+        let (path, model_count) = match crate::services::onboarding::publish(state) {
             Ok(result) => result,
             Err(()) => return internal_error(),
         };
-        crate::services::account_catalog::request_refresh(state, false);
         return json_response(
-            &json!({"status":"ok","catalog_path":path,"model_count":model_count}),
+            &json!({"status":"ok","catalog_path":path,"model_count":model_count,
+                "operation":{"scope":"local_catalog", "state":"completed", "client_catalog_verified":false}}),
         );
     }
     if request.raw_path() == "/api/models/metadata" {

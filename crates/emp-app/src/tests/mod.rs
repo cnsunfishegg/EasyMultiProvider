@@ -591,3 +591,5 @@ fn test_server() -> (TempDir, ServerHandle) {
         .expect("start server");
     (directory, server)
 }
+
+mod availability_contract;

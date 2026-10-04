@@ -298,3 +298,5 @@ where
     output.extend(parser.finish()?);
     Ok(output)
 }
+
+pub use failure::confirmed_quota_error;

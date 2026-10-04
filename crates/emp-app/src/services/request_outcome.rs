@@ -16,6 +16,7 @@ pub(crate) fn profile_request_bytes(body: &Value) -> usize {
 
 pub(crate) struct RequestOutcome<'a> {
     state: &'a ServerState,
+    availability: Option<super::availability::Subject>,
     identity: Option<crate::services::activity::ActivityIdentity>,
     started: Instant,
     first_token: Option<Instant>,
@@ -81,6 +82,7 @@ impl<'a> RequestOutcome<'a> {
             .observe_request(&event, identity.as_ref(), false);
         Self {
             state,
+            availability: super::availability::ticket(route),
             identity,
             started: Instant::now(),
             first_token: None,
@@ -92,6 +94,9 @@ impl<'a> RequestOutcome<'a> {
     pub(crate) fn observe(&mut self, event: &Value) {
         if self.finalized {
             return;
+        }
+        if let Some(subject) = &self.availability {
+            self.state.backend.availability.event(subject, event);
         }
         let now = Instant::now();
         let response = event
@@ -251,6 +256,16 @@ impl<'a> RequestOutcome<'a> {
     }
     pub(crate) fn finish(&mut self) {
         if !self.finalized {
+            // Buffered Compact responses need not contain response.completed.
+            // Only this request's claimed recovery probe can clear its block.
+            if self.event["success"] == true
+                && let Some(subject) = &self.availability
+            {
+                self.state
+                    .backend
+                    .availability
+                    .event(subject, &json!({"type":"response.completed"}));
+            }
             let duration_ms = self.started.elapsed().as_millis() as u64;
             self.event["duration_ms"] = json!(duration_ms);
             if let Some(first) = self.first_token {

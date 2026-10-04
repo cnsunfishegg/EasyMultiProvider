@@ -34,12 +34,14 @@ impl NativeHttpError {
         reason: Option<&str>,
         retry: Option<u64>,
     ) -> Self {
-        let code = if class == FailureClass::RateLimit {
+        let code = if reason == Some("quota_exhausted_confirmed") {
+            "usage_limit_reached"
+        } else if class == FailureClass::RateLimit {
             "rate_limit_exceeded"
         } else {
             reason.unwrap_or(class.as_str())
         };
-        let mut error = json!({"code": code, "type": class.as_str(), "message": message.into()});
+        let mut error = json!({"code": code, "type": if code == "usage_limit_reached" { code } else { class.as_str() }, "message": message.into()});
         if let Some(reason) = reason {
             error["failure_reason"] = reason.into();
         }
@@ -250,7 +252,11 @@ pub(super) fn upstream_http_error(
     let (_, detail) = error_detail(content_type, raw);
     let failure = http_failure(HttpFailureInput {
         status,
-        detail: &detail,
+        detail: if emp_transport::confirmed_quota_error(&String::from_utf8_lossy(raw)) {
+            std::str::from_utf8(raw).unwrap_or(&detail)
+        } else {
+            &detail
+        },
         proxy_evidence: proxy_evidence(proxy_headers, &detail),
         retry_after_seconds: retry,
     });

@@ -464,7 +464,7 @@ impl ServerHandle {
                             return;
                         }
                         let now = Instant::now();
-                        if now >= deadline {
+                        if now >= deadline || !wait.is_empty() {
                             break;
                         }
                         let result = state
@@ -477,10 +477,15 @@ impl ServerHandle {
                             Err(_) => return,
                         }
                     }
+                    let requested = std::mem::take(&mut *wait).into_iter().collect();
                     drop(wait);
-                    deadline = Instant::now() + QUOTA_SAMPLE_INTERVAL;
                     if !state.shutdown.load(Ordering::Acquire) {
-                        sample_quotas_once(&state);
+                        if Instant::now() >= deadline {
+                            sample_quotas_once(&state);
+                            deadline = Instant::now() + QUOTA_SAMPLE_INTERVAL;
+                        } else {
+                            crate::services::quota::sample_quota_targets(&state, requested);
+                        }
                         // Disabled or duplicate accounts are not sampled;
                         // their rotated credentials still need saving.
                         crate::services::quota::flush_pending_rotations(&state);
@@ -595,7 +600,15 @@ impl ServerHandle {
         let workers: Vec<JoinHandle<()>> =
             workers.into_inner().map_err(|_| AppError::ServerStopped)?;
         for worker in workers {
+            let name = worker.thread().name().unwrap_or("emp-worker").to_owned();
+            let started = Instant::now();
+            self.state.backend.diagnostics.journal.event(
+                "info",
+                "shutdown_worker_wait",
+                &serde_json::json!({"worker":name}),
+            );
             let _: () = worker.join().map_err(|_| AppError::ServerStopped)?;
+            self.state.backend.diagnostics.journal.event("info", "shutdown_worker_complete", &serde_json::json!({"worker":name,"duration_ms":started.elapsed().as_millis() as u64}));
         }
         // Last chance to save credentials Codex rotated: the stored copies
         // may already be invalid upstream.

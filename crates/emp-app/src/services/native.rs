@@ -5,7 +5,7 @@ use crate::services::accounts::native_auth_document;
 use crate::services::catalog::response_catalog_etag;
 use crate::services::disconnect::DisconnectMonitor;
 use crate::services::disconnect::DisconnectRace;
-use crate::services::quota::refresh_account_serialized;
+use crate::services::quota::refresh_after_auth_rejection;
 use emp_codex::account_auth_headers;
 use emp_core::ResolvedRoute;
 use emp_router::ProjectionIds;
@@ -48,10 +48,20 @@ fn account_headers(
     }
     let auth = state
         .backend
-        .configuration
-        .vault
-        .read_encrypted_json(Path::new(path))
-        .map_err(|_| NativeHttpError::router(503, "stored encrypted auth.json is invalid"))?;
+        .accounts
+        .pending_rotations
+        .lock()
+        .ok()
+        .and_then(|pending| pending.get(path).cloned())
+        .or_else(|| {
+            state
+                .backend
+                .configuration
+                .vault
+                .read_encrypted_json(Path::new(path))
+                .ok()
+        })
+        .ok_or_else(|| NativeHttpError::router(503, "stored encrypted auth.json is invalid"))?;
     let auth = emp_state::validate_auth_json(&auth)
         .map_err(|error| NativeHttpError::router(503, error.to_string()))?;
     account_auth_headers(&auth)
@@ -77,7 +87,7 @@ fn resolve_headers(
                 .get("id")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            refresh_account_serialized(state, id)
+            refresh_after_auth_rejection(state, id)
                 .map_err(|error| NativeHttpError::router(503, error.to_string()))?;
         }
         selected = Some(account_headers(state, account)?);
@@ -90,8 +100,10 @@ fn resolve_headers(
     } else {
         NativeAuth::Forward
     };
-    request_headers(auth, incoming, stream)
-        .map_err(|error| NativeHttpError::router(error.status(), error.to_string()))
+    let headers = request_headers(auth, incoming, stream)
+        .map_err(|error| NativeHttpError::router(error.status(), error.to_string()))?;
+    super::availability::validate_owner(route, &headers)?;
+    Ok(headers)
 }
 
 fn plaintext_collaboration(config: &Value) -> bool {
@@ -199,7 +211,27 @@ fn open_stream_result_with_monitor(
         )
     };
     let on_retry = |decision| observe_retry(state, incoming, decision);
+    let gate = || {
+        state
+            .backend
+            .availability
+            .before_attempt(route)
+            .map_err(|e| e.native())
+    };
+    let failure = |error: &NativeHttpError| {
+        if let Some(subject) = super::availability::ticket(route) {
+            state.backend.availability.failure(
+                &subject,
+                error.body["error"]["failure_reason"]
+                    .as_str()
+                    .unwrap_or_default(),
+                error.body["error"]["retry_after_seconds"].as_u64(),
+            );
+        }
+        state.backend.availability.before_attempt(route).is_ok()
+    };
     let router = NativeRouter::new(&state.backend.transport.client)
+        .with_attempt_policy(&gate, &failure)
         .with_retry_observer(&on_retry)
         .with_attempt_observer(&on_attempt);
     let mut usage_owner = String::new();
@@ -230,6 +262,7 @@ fn open_stream_result_with_monitor(
             Ok(CancellableNativeStreamOpen::Opened(Box::new(stream)))
         }
         Err(error) => {
+            failure(&error);
             let mut observation = crate::services::request_outcome::RequestOutcome::new(
                 state,
                 route,
@@ -262,7 +295,27 @@ pub(crate) fn complete(
             incoming,
         )
     };
+    let gate = || {
+        state
+            .backend
+            .availability
+            .before_attempt(route)
+            .map_err(|e| e.native())
+    };
+    let failure = |error: &NativeHttpError| {
+        if let Some(subject) = super::availability::ticket(route) {
+            state.backend.availability.failure(
+                &subject,
+                error.body["error"]["failure_reason"]
+                    .as_str()
+                    .unwrap_or_default(),
+                error.body["error"]["retry_after_seconds"].as_u64(),
+            );
+        }
+        state.backend.availability.before_attempt(route).is_ok()
+    };
     let router = NativeRouter::new(&state.backend.transport.client)
+        .with_attempt_policy(&gate, &failure)
         .with_retry_observer(&on_retry)
         .with_attempt_observer(&on_attempt);
     let mut usage_owner = String::new();
@@ -336,7 +389,27 @@ pub(crate) fn compact(
             incoming,
         )
     };
+    let gate = || {
+        state
+            .backend
+            .availability
+            .before_attempt(route)
+            .map_err(|e| e.native())
+    };
+    let failure = |error: &NativeHttpError| {
+        if let Some(subject) = super::availability::ticket(route) {
+            state.backend.availability.failure(
+                &subject,
+                error.body["error"]["failure_reason"]
+                    .as_str()
+                    .unwrap_or_default(),
+                error.body["error"]["retry_after_seconds"].as_u64(),
+            );
+        }
+        state.backend.availability.before_attempt(route).is_ok()
+    };
     let router = NativeRouter::new(&state.backend.transport.client)
+        .with_attempt_policy(&gate, &failure)
         .with_retry_observer(&on_retry)
         .with_attempt_observer(&on_attempt);
     let mut usage_owner = String::new();

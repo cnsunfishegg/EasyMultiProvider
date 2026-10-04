@@ -166,16 +166,24 @@ pub(crate) fn serve_responses_websocket(
         }
         let etag = response_catalog_etag(state).unwrap_or_default();
         if websocket.send_json(&serde_json::json!({"type":"codex.response.metadata","headers":{"x-models-etag":etag}})).is_err(){return;}
-        let (config, route, mut request_body) = match prepare_request(
+        let (config, route, mut request_body, _admission) = match prepare_request(
             state,
             Value::Object(request_body),
             RequestOperation::Responses,
+            &incoming,
         ) {
             Ok(PreparedRequest {
+                admission,
                 config,
                 route,
                 body: Value::Object(body),
-            }) => (config, route, body),
+            }) => (config, route, body, admission),
+            Err(RequestPreparationError::Admission(error)) => {
+                if websocket.send_json(&error.websocket()).is_err() {
+                    return;
+                }
+                continue;
+            }
             Err(RequestPreparationError::ModelRequired) => {
                 let _ = websocket.send_json(&serde_json::json!({
                     "type":"error", "status":400,

@@ -59,6 +59,17 @@ pub struct RouterError {
 }
 
 impl RouterError {
+    /// Local admission uses the ordinary protocol failure boundary.
+    pub fn quota_unavailable() -> Self {
+        Self::new(
+            RouterErrorKind::Upstream,
+            429,
+            FailureClass::RateLimit,
+            Some("quota_admission_rejected".to_owned()),
+            None,
+            "The selected source requires a quota recheck for this model.",
+        )
+    }
     fn new(
         kind: RouterErrorKind,
         status: u16,

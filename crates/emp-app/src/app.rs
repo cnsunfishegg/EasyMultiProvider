@@ -61,6 +61,7 @@ impl ServerState {
 }
 
 pub(crate) struct BackendState {
+    pub(crate) availability: Arc<crate::services::availability::Availability>,
     pub(crate) configuration: ConfigurationState,
     pub(crate) transport: TransportState,
     pub(crate) accounts: AccountState,
@@ -153,6 +154,7 @@ impl BackendState {
         let management_events =
             Arc::new(crate::services::management_events::ManagementEvents::default());
         Ok(Self {
+            availability: Default::default(),
             usage: crate::services::usage::UsageState::new(
                 &state_root,
                 Arc::clone(&management_events),
@@ -167,6 +169,7 @@ impl BackendState {
                 native_connections: Default::default(),
             },
             accounts: AccountState {
+                quota_refreshes: Default::default(),
                 native_auth_path,
                 codex_home: codex_home.clone(),
                 codex_binary: codex_binary.to_owned(),
@@ -174,7 +177,7 @@ impl BackendState {
                 quota_refresh_errors: Mutex::new(BTreeMap::new()),
                 quota_refresh_locks: Mutex::new(BTreeMap::new()),
                 quota_history: QuotaHistoryStore::new(state_root.join("quota_history.sqlite3")),
-                quota_sampler_wait: Mutex::new(()),
+                quota_sampler_wait: Mutex::default(),
                 quota_sampler_condition: Condvar::new(),
                 pending_rotations: Mutex::new(BTreeMap::new()),
                 credential_operations: Default::default(),

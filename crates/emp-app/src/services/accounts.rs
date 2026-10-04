@@ -63,6 +63,8 @@ pub(crate) fn native_account_snapshot(state: &ServerState, config: &Value) -> Va
             .cloned()
             .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
         "quota": quota,
+        "availability": super::availability::account_identity(state, "@native")
+            .map(|(owner, _)| state.backend.availability.snapshot(&owner)),
     })
 }
 
@@ -86,12 +88,21 @@ pub(crate) fn accounts_snapshot(state: &ServerState) -> Option<Value> {
                 .map(|(key, value)| (key.clone(), Value::String(value.clone())))
                 .collect::<serde_json::Map<_, _>>()
         })?;
+    let mut accounts = public
+        .get("accounts")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for account in &mut accounts {
+        if let Some(id) = account["id"].as_str()
+            && let Some((owner, _)) = super::availability::account_identity(state, id)
+        {
+            account["availability"] = state.backend.availability.snapshot(&owner);
+        }
+    }
     Some(serde_json::json!({
         "native_account": native_account_snapshot(state, &config),
-        "accounts": public
-            .get("accounts")
-            .cloned()
-            .unwrap_or_else(|| Value::Array(Vec::new())),
+        "accounts": accounts,
         "refresh_errors": errors,
     }))
 }
@@ -202,6 +213,42 @@ pub(crate) fn import_account_state(state: &ServerState, body: &Value) -> Result<
         .edit()
         .map_err(|_| "internal server error".to_owned())?;
     let (auth_path, mut updated) = prepare(&config)?;
+    let same_metadata = |account: &Value| {
+        let mut view = account.clone();
+        if let Some(view) = view.as_object_mut() {
+            view.remove("quota");
+            view.remove("credential_status");
+        }
+        view
+    };
+    let old = config["accounts"]
+        .as_array()
+        .and_then(|accounts| accounts.iter().find(|a| a["id"] == account_id));
+    let new = updated["accounts"]
+        .as_array()
+        .and_then(|accounts| accounts.iter().find(|a| a["id"] == account_id));
+    if old
+        .zip(new)
+        .is_some_and(|(old, new)| same_metadata(old) == same_metadata(new))
+        && state
+            .backend
+            .configuration
+            .vault
+            .read_encrypted_json(&auth_path)
+            .ok()
+            .as_ref()
+            == Some(&auth)
+        && !state
+            .backend
+            .accounts
+            .pending_rotations
+            .lock()
+            .is_ok_and(|pending| pending.contains_key(&auth_path.to_string_lossy().to_string()))
+    {
+        drop(config);
+        return account_public_snapshot(state, account_id)
+            .ok_or_else(|| "account import failed".to_owned());
+    }
     if configured(&config) {
         // The id is about to name new credentials: its legacy rows must be
         // attributed with the credentials that recorded them, or dropped.
@@ -430,6 +477,7 @@ pub(crate) fn forget_pending_rotation(state: &ServerState, auth_path: &Path) {
 }
 
 pub(crate) struct AccountState {
+    pub(crate) quota_refreshes: super::quota::RefreshCoordinator,
     pub(crate) native_auth_path: PathBuf,
     pub(crate) codex_home: PathBuf,
     pub(crate) codex_binary: String,
@@ -437,7 +485,7 @@ pub(crate) struct AccountState {
     pub(crate) quota_refresh_errors: Mutex<BTreeMap<String, String>>,
     pub(crate) quota_refresh_locks: Mutex<BTreeMap<String, Arc<Mutex<()>>>>,
     pub(crate) quota_history: QuotaHistoryStore,
-    pub(crate) quota_sampler_wait: Mutex<()>,
+    pub(crate) quota_sampler_wait: Mutex<std::collections::BTreeSet<String>>,
     pub(crate) quota_sampler_condition: Condvar,
     /// Rotated credentials whose durable save failed, keyed by encrypted
     /// auth file. Codex may already have invalidated the stored refresh token,

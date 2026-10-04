@@ -157,19 +157,31 @@ pub(crate) fn management_quota_request(
             &[],
         );
     }
-    let refresh_lock = match quota_refresh_lock(state, &account) {
-        Some(lock) => lock,
-        None => {
-            return json_error_response(500, status_text(500), "internal server error", None, &[]);
-        }
-    };
-    let _refresh_guard = match refresh_lock.lock() {
-        Ok(guard) => guard,
-        Err(_) => {
-            return json_error_response(500, status_text(500), "internal server error", None, &[]);
-        }
-    };
     if reset {
+        let refresh_lock = match quota_refresh_lock(state, &account) {
+            Some(lock) => lock,
+            None => {
+                return json_error_response(
+                    500,
+                    status_text(500),
+                    "internal server error",
+                    None,
+                    &[],
+                );
+            }
+        };
+        let _refresh_guard = match refresh_lock.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return json_error_response(
+                    500,
+                    status_text(500),
+                    "internal server error",
+                    None,
+                    &[],
+                );
+            }
+        };
         let key = body
             .get("idempotency_key")
             .and_then(Value::as_str)
@@ -215,6 +227,7 @@ pub(crate) fn management_quota_request(
                 );
             }
         };
+        crate::services::quota::invalidate_refresh(state, &account);
         let (account_snapshot, refresh_error) = match refresh_account_by_id(state, &account) {
             Ok(snapshot) => (snapshot, Value::Null),
             Err(error) => (
@@ -233,7 +246,7 @@ pub(crate) fn management_quota_request(
         .expect("quota reset result is serializable");
         return response("HTTP/1.1 200 OK", "application/json", &response_body, &[]);
     }
-    let refreshed = refresh_account_by_id(state, &account);
+    let refreshed = crate::services::quota::refresh_account_serialized(state, &account);
     match refreshed {
         Ok(account_snapshot) => {
             let body = serde_json::to_vec(&serde_json::json!({"account": account_snapshot}))

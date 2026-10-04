@@ -85,8 +85,17 @@ pub struct RuntimeInventory {
     cache: Mutex<Option<Cached>>,
     /// Serialize slow observations without blocking cached-value readers.
     probe: Mutex<()>,
+    configured_only: bool,
 }
 impl RuntimeInventory {
+    /// Observe only an explicitly injected engine, without probing unrelated
+    /// host installations. Used by isolated server fixtures.
+    pub fn isolated(home: PathBuf, executable: PathBuf) -> Self {
+        let mut inventory =
+            Self::with_discovery(home, PathBuf::new(), Some(executable), None, Vec::new());
+        inventory.configured_only = true;
+        inventory
+    }
     pub fn new(home: PathBuf, configured: Option<PathBuf>) -> Self {
         let user_home = PathBuf::from(
             std::env::var_os("HOME")
@@ -119,6 +128,7 @@ impl RuntimeInventory {
             nvm_roots,
             cache: Mutex::new(None),
             probe: Mutex::new(()),
+            configured_only: false,
         }
     }
     /// Observe executable engines without claiming protocol compatibility.
@@ -137,13 +147,16 @@ impl RuntimeInventory {
         if let Some(value) = self.reusable_snapshot(refresh, requested) {
             return value;
         }
-        let candidates = discovery::discover(
+        let mut candidates = discovery::discover(
             &self.home,
             &self.user_home,
             self.configured.as_deref(),
             self.path_var.as_deref(),
             &self.nvm_roots,
         );
+        if self.configured_only {
+            candidates.retain(|candidate| candidate.source == "configured");
+        }
         let candidate_identities = candidates
             .iter()
             .flat_map(|candidate| {
@@ -308,13 +321,14 @@ mod tests {
         std::fs::create_dir(&codex_home).unwrap();
         std::fs::create_dir(&user_home).unwrap();
         let binary = script(root.path(), "codex", "echo codex-cli 0.158.0", 0o700);
-        let inventory = RuntimeInventory::with_discovery(
+        let mut inventory = RuntimeInventory::with_discovery(
             codex_home,
             user_home,
             Some(binary.clone()),
             Some(OsString::new()),
             Vec::new(),
         );
+        inventory.configured_only = true;
 
         assert_eq!(inventory.prepared_executable().unwrap().path(), binary);
         assert_eq!(inventory.snapshot(false)["helper_source"], "configured");
@@ -344,13 +358,14 @@ mod tests {
         std::fs::create_dir(&home).unwrap();
         std::fs::create_dir(&user_home).unwrap();
         std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let inventory = RuntimeInventory::with_discovery(
+        let mut inventory = RuntimeInventory::with_discovery(
             home,
             user_home,
             None,
             Some(OsString::new()),
             Vec::new(),
         );
+        inventory.configured_only = true;
         assert!(inventory.prepared_executable().is_none());
     }
 

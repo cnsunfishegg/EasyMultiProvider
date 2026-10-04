@@ -9,14 +9,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Killow1998/EasyMultiProvider/releases/latest"><img alt="GitHub release" src="https://img.shields.io/github/v/release/Killow1998/EasyMultiProvider"></a>
+  <a href="https://github.com/cnsunfishegg/EasyMultiProvider/releases/latest"><img alt="GitHub release" src="https://img.shields.io/github/v/release/cnsunfishegg/EasyMultiProvider"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/Killow1998/EasyMultiProvider"></a>
   <img alt="Codex CLI · App · IDE" src="https://img.shields.io/badge/Codex-CLI%20%C2%B7%20App%20%C2%B7%20IDE-blue">
   <img alt="Windows Linux macOS" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey">
 </p>
 
 <p align="center">
-  <a href="https://github.com/Killow1998/EasyMultiProvider/releases/latest"><strong>Download</strong></a>
+  <a href="https://github.com/cnsunfishegg/EasyMultiProvider/releases/latest"><strong>Download</strong></a>
   · <a href="#quick-start">Quick Start</a>
   · <a href="#what-emp-does">Features</a>
   · <a href="#docs">Docs</a>
@@ -44,7 +44,7 @@ The prefixed names are examples; you choose the account, provider, and models. S
 
 ### 1. Download EMP
 
-Download the latest reviewed build from [GitHub Releases](https://github.com/Killow1998/EasyMultiProvider/releases/latest).
+Download the latest reviewed build from [GitHub Releases](https://github.com/cnsunfishegg/EasyMultiProvider/releases/latest).
 
 | Platform | Package | Install and launch |
 | --- | --- | --- |
@@ -200,7 +200,7 @@ control changes catalog labels, not context windows or request limits.
 
 ## Codex compatibility
 
-The current source version is **v0.12.10**.
+The current source version is **v0.12.11**.
 
 EMP supports Codex CLI, desktop App and IDE extension installations without a
 universal minimum engine version. Each operation depends on the interfaces that
@@ -346,7 +346,7 @@ The Linux user installer and Web UI updates do not require sudo or an administra
 
 A red dot on **Check updates** marks an available release. If an older Windows
 version exits during an update without reopening, download `EMP.exe` from
-[Releases](https://github.com/Killow1998/EasyMultiProvider/releases/latest),
+[Releases](https://github.com/cnsunfishegg/EasyMultiProvider/releases/latest),
 replace the closed executable and open it. Your accounts and settings stay in
 the user configuration directory. Version 0.12.5 fixes the exited-process wait
 for subsequent updates.

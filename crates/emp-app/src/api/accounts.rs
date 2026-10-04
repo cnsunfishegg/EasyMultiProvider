@@ -11,7 +11,7 @@ use crate::http::response::response;
 use crate::http::response::status_text;
 use crate::http::response::unauthorized_response;
 use crate::services::account_catalog::CatalogRefreshError;
-use crate::services::accounts::import_account_state;
+
 use std::net::TcpStream;
 
 pub(crate) fn management_account_request(
@@ -58,9 +58,9 @@ pub(crate) fn management_account_request(
             }
         };
     }
-    match import_account_state(state, &body) {
-        Ok(account) => {
-            let body = serde_json::to_vec(&serde_json::json!({"account":account})).unwrap();
+    match crate::services::onboarding::import(state, &body) {
+        Ok(result) => {
+            let body = serde_json::to_vec(&result).unwrap();
             response("HTTP/1.1 200 OK", "application/json", &body, &[])
         }
         Err(error) => json_error_response(400, status_text(400), &error, None, &[]),
